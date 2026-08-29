@@ -1,6 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
-
-export const supabase = createClient(
-  'https://wivfpolfzluyworliwkb.supabase.co',
-  'sb_publishable_CHyyYkSNMkezaGBs9yKT_w_22SyHnOC'
-)
+alter table public.messages disable row level security;
+drop policy if exists "allow all" on public.messages;
+create policy "allow all" on public.messages for all using (true) with check (true);
+alter publication supabase_realtime add table public.messages;
