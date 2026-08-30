@@ -43,6 +43,7 @@ export default function App(){
   const [dobMonth,setDobMonth]=useState('')
   const [dobDay,setDobDay]=useState('')
   const [dobYear,setDobYear]=useState('')
+  const [showPass,setShowPass]=useState(false)
   
   // VOICE & CALL - DISCORD STYLE 100%
   const [inVoice,setInVoice]=useState<string|null>(null)
@@ -315,8 +316,14 @@ export default function App(){
 
               <div>
                 <label className="text-[12px] font-bold text-[#b5bac1] uppercase flex gap-1">Senha <span className="text-[#f23f43]">*</span></label>
-                <input value={regPass} onChange={e=>setRegPass(e.target.value)} type="password" className="w-full mt-2 bg-[#2b2d31] border border-[#1e1f22] rounded-[4px] p-2.5 text-[16px] text-white outline-none" />
+                <div className="relative mt-2">
+                  <input value={regPass} onChange={e=>setRegPass(e.target.value)} type={showPass ? "text" : "password"} className="w-full bg-[#2b2d31] border border-[#1e1f22] rounded-[4px] p-2.5 pr-10 text-[16px] text-white outline-none focus:border-[#00a8fc]" />
+                  <button type="button" onClick={()=>setShowPass(!showPass)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#b5bac1] hover:text-white text-[18px] w-6 h-6 flex items-center justify-center" title={showPass ? "Esconder senha" : "Mostrar senha"}>
+                    {showPass ? '🙈' : '👁'}
+                  </button>
+                </div>
                 {authMode==='login' && <a className="text-[14px] text-[#00a8fc] hover:underline mt-1 inline-block">Esqueceu sua senha?</a>}
+                {regPass && <div className="text-[11px] mt-1 flex items-center gap-1"><span className={regPass.length>=6 ? "text-[#23a559]" : "text-[#fa777c]"}>{regPass.length>=6 ? "✓" : "✗"} {regPass.length} caracteres {regPass.length>=6 ? "(forte)" : "(mínimo 6)"}</span><span className="ml-auto text-[#6d6f78]">{showPass ? "Senha visível" : "Clique no 👁 pra ver"}</span></div>}
               </div>
 
               {authMode==='register' && (
