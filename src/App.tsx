@@ -374,21 +374,24 @@ export default function App(){
 
   const formatTime=(s:number)=>{ const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}` }
 
-  // 🔥 GLOBAL FRIEND SYSTEM - FIX CORRIGIDO
+  // 🔥 GLOBAL FRIEND SYSTEM - FIX CORRIGIDO SEM .or()
   const loadFriendsGlobal = async (userName:string) => {
     if(!supabase || !userName) return
     try{
-      const { data, error } = await supabase.from('nexus_friends').select('*').or(`owner_name.eq.${userName},friend_name.eq.${userName}`)
-      if(error) { console.log('erro friends', error); return }
-      if(data){
+      const { data: data1 } = await supabase.from('nexus_friends').select('*').eq('owner_name', userName)
+      const { data: data2 } = await supabase.from('nexus_friends').select('*').eq('friend_name', userName)
+      const data = [...(data1||[]), ...(data2||[])]
+      if(data && data.length>0){
         const accepted = data.filter((f:any)=>f.status==='accepted').map((f:any)=> f.owner_name===userName ? f.friend_name : f.owner_name)
-        setFriends([...new Set(accepted)])
+        setFriends([...new Set(accepted)] as any)
         const pending = data.filter((f:any)=>f.status==='pending').map((f:any)=>{
           const other = f.owner_name===userName ? f.friend_name : f.owner_name
           const isIncoming = f.friend_name===userName
           return { id: f.id, name: other, status: f.status as any, avatar: other[0].toUpperCase(), mutual: 1, isIncoming, raw: f }
         })
         setFriendRequests(pending)
+      } else {
+        // se não tem dados, mantém vazio mas não apaga se já tem local
       }
     }catch(e){ console.log('loadFriends error', e) }
   }
