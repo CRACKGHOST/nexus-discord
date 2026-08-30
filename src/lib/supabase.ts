@@ -1,4 +1,6 @@
-alter table public.messages disable row level security;
-drop policy if exists "allow all" on public.messages;
-create policy "allow all" on public.messages for all using (true) with check (true);
-alter publication supabase_realtime add table public.messages;
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+
+export const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null
