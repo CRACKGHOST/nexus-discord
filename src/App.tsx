@@ -40,6 +40,9 @@ export default function App(){
   const [regEmail,setRegEmail]=useState('')
   const [regPass,setRegPass]=useState('')
   const [regDob,setRegDob]=useState('')
+  const [dobMonth,setDobMonth]=useState('')
+  const [dobDay,setDobDay]=useState('')
+  const [dobYear,setDobYear]=useState('')
   
   // VOICE & CALL - DISCORD STYLE 100%
   const [inVoice,setInVoice]=useState<string|null>(null)
@@ -321,10 +324,20 @@ export default function App(){
                   <div>
                     <label className="text-[12px] font-bold text-[#b5bac1] uppercase flex gap-1">Data de nascimento <span className="text-[#f23f43]">*</span></label>
                     <div className="grid grid-cols-3 gap-2 mt-2">
-                      <select className="bg-[#2b2d31] border border-[#1e1f22] rounded-[4px] p-2.5 text-white"><option>Mês</option></select>
-                      <select className="bg-[#2b2d31] border border-[#1e1f22] rounded-[4px] p-2.5 text-white"><option>Dia</option></select>
-                      <select className="bg-[#2b2d31] border border-[#1e1f22] rounded-[4px] p-2.5 text-white"><option>Ano</option></select>
+                      <select value={dobMonth} onChange={e=>setDobMonth(e.target.value)} className="bg-[#2b2d31] border border-[#1e1f22] rounded-[4px] p-2.5 text-white outline-none">
+                        <option value="">Mês</option>
+                        <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option><option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option><option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option><option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+                      </select>
+                      <select value={dobDay} onChange={e=>setDobDay(e.target.value)} className="bg-[#2b2d31] border border-[#1e1f22] rounded-[4px] p-2.5 text-white outline-none">
+                        <option value="">Dia</option>
+                        {Array.from({length:31}, (_,i)=>i+1).map(d=><option key={d} value={d}>{d}</option>)}
+                      </select>
+                      <select value={dobYear} onChange={e=>setDobYear(e.target.value)} className="bg-[#2b2d31] border border-[#1e1f22] rounded-[4px] p-2.5 text-white outline-none">
+                        <option value="">Ano</option>
+                        {Array.from({length:100}, (_,i)=>new Date().getFullYear()-i).map(y=><option key={y} value={y}>{y}</option>)}
+                      </select>
                     </div>
+                    {(dobMonth||dobDay||dobYear) && <div className="text-[11px] text-[#23a559] mt-1">✓ {dobDay||'?'}/{dobMonth||'?'} / {dobYear||'?'}</div>}
                   </div>
                   <label className="flex gap-2 items-start mt-2">
                     <input type="checkbox" defaultChecked className="mt-1" />
@@ -339,7 +352,8 @@ export default function App(){
                   if(!regEmail) return alert('Email obrigatório igual Discord!')
                   if(users.find(u=>u.name.toLowerCase()===regName.toLowerCase())) return alert('Esse nome já existe nesse IP/PC!')
                   const id=Date.now().toString()
-                  const u={ id, name:regName, email:regEmail, avatar:regName[0].toUpperCase(), banner:'#7c3aed', password:regPass, bio:'', tag:Math.floor(1000+Math.random()*9000).toString(), dob:regDob } as User
+                  const dobFull = `${dobDay||''}/${dobMonth||''}/${dobYear||''}`
+                  const u={ id, name:regName, email:regEmail, avatar:regName[0].toUpperCase(), banner:'#7c3aed', password:regPass, bio:'', tag:Math.floor(1000+Math.random()*9000).toString(), dob:dobFull } as User
                   setUsers([...users,u]); setCurrentUser(u); localStorage.setItem('nexus-users', JSON.stringify([...users,u])); localStorage.setItem('nexus-current', JSON.stringify(u))
                   if(supabase){ try{ await supabase.from('nexus_users').insert({ id, name:regName, email:regEmail, password:regPass, avatar:regName[0].toUpperCase() }) }catch(e){ console.log(e) } }
                 }else{
