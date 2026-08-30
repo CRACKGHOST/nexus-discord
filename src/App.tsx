@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 type User = { id:string, name:string, avatar:string, banner:string, password:string, bio:string }
 type Group = { id:string, name:string, ownerId:string, icon:string, color:string, logo?:string }
 type Channel = { id:string, name:string, type:'text'|'voice', groupId:string, photo?:string, createdBy?:string }
+type FriendRequest = { id:string, name:string, status:'pending'|'accepted'|'blocked', avatar:string, mutual?:number }
 
 export default function App(){
   const [users,setUsers]=useState<User[]>(()=>{ try{ return JSON.parse(localStorage.getItem('nexus-users')||'[]') }catch{ return [] } })
@@ -23,7 +24,11 @@ export default function App(){
   const [newGroupName,setNewGroupName]=useState('')
   const [showAddFriend,setShowAddFriend]=useState(false)
   const [addFriendName,setAddFriendName]=useState('')
+  const [addFriendStatus,setAddFriendStatus]=useState<'idle'|'success'|'error'|'already'|'self'>('idle')
+  const [addFriendMsg,setAddFriendMsg]=useState('')
   const [friends,setFriends]=useState<string[]>(()=>{ try{ return JSON.parse(localStorage.getItem('nexus-friends')||'[]') }catch{ return [] } })
+  const [friendRequests,setFriendRequests]=useState<FriendRequest[]>(()=>{ try{ return JSON.parse(localStorage.getItem('nexus-requests')||'[]') }catch{ return [] } })
+  const [friendsTab,setFriendsTab]=useState<'online'|'all'|'pending'|'blocked'|'add'>('online')
   const [showGroupMenu,setShowGroupMenu]=useState(false)
   const [showChannelConfig,setShowChannelConfig]=useState<Channel|null>(null)
   const [editChannelName,setEditChannelName]=useState('')
@@ -49,6 +54,7 @@ export default function App(){
   const [logoImage,setLogoImage]=useState(()=>localStorage.getItem('nexus-logo')||'')
   const [editingName,setEditingName]=useState(false)
   const [newNameInput,setNewNameInput]=useState('')
+  const [showFriendsPage,setShowFriendsPage]=useState(false)
   const endRef=useRef<HTMLDivElement>(null)
   const micRef=useRef<MediaStream|null>(null)
   const audioRef=useRef<HTMLAudioElement>(null)
@@ -74,6 +80,7 @@ export default function App(){
   useEffect(()=>{ try{ localStorage.setItem('nexus-channels',JSON.stringify(channels)) }catch{} },[channels])
   useEffect(()=>{ try{ localStorage.setItem('nexus-msgs',JSON.stringify(msgs)) }catch{} },[msgs])
   useEffect(()=>{ try{ localStorage.setItem('nexus-friends',JSON.stringify(friends)) }catch{} },[friends])
+  useEffect(()=>{ try{ localStorage.setItem('nexus-requests',JSON.stringify(friendRequests)) }catch{} },[friendRequests])
   useEffect(()=>{ endRef.current?.scrollIntoView({behavior:'smooth'}) },[msgs])
   useEffect(()=>{ let t:any; if(inVoice){ t=setInterval(()=>setVoiceTime(v=>v+1),1000) } else setVoiceTime(0); return()=>clearInterval(t) },[inVoice])
 
@@ -327,6 +334,40 @@ export default function App(){
 
   const formatTime=(s:number)=>{ const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}` }
 
+  // DISCORD-LIKE ADD FRIEND LOGIC
+  const handleAddFriendDiscord = () => {
+    const name = addFriendName.trim()
+    if(!name){
+      setAddFriendStatus('error')
+      setAddFriendMsg('Você precisa digitar um nome de usuário.')
+      return
+    }
+    if(name.toLowerCase() === currentUser?.name.toLowerCase()){
+      setAddFriendStatus('self')
+      setAddFriendMsg('Você não pode adicionar a si mesmo como amigo!')
+      return
+    }
+    if(friends.includes(name)){
+      setAddFriendStatus('already')
+      setAddFriendMsg('Você já é amigo desse usuário!')
+      return
+    }
+    // Sucesso - igual Discord
+    setFriends([...friends, name])
+    const newReq: FriendRequest = { id: Date.now().toString(), name, status: 'pending', avatar: name[0].toUpperCase(), mutual: Math.floor(Math.random()*5) }
+    setFriendRequests([...friendRequests, newReq])
+    setAddFriendStatus('success')
+    setAddFriendMsg(`Pedido de amizade enviado para ${name}!`)
+    setAddFriendName('')
+    setTimeout(()=>{ setFriendsTab('pending') }, 800)
+  }
+
+  const acceptFriend = (id:string) => {
+    const req = friendRequests.find(r=>r.id===id)
+    if(req && !friends.includes(req.name)) setFriends([...friends, req.name])
+    setFriendRequests(friendRequests.map(r=>r.id===id?{...r, status:'accepted'}:r))
+  }
+
   const themeColors=[
     {name:'NEXUS Roxo', color:'#7c3aed'},
     {name:'Discord Blur', color:'#5865F2'},
@@ -359,14 +400,15 @@ export default function App(){
   }
 
   const filtered=msgs.filter(m=>m.groupId===activeChannel)
-  const activeGroupData=groups.find(g=>g.id===activeGroup)
   const activeChannelData=channels.find(c=>c.id===activeChannel)
 
   return(
     <div className="flex h-screen bg-[#313338] text-white text-sm overflow-hidden">
       <div className="w-[72px] bg-[#1e1f22] flex flex-col items-center py-3 gap-2">
+        <div onClick={()=>{ setShowFriendsPage(true); setActiveGroup('') }} className={`w-12 h-12 rounded-[24px] flex items-center justify-center cursor-pointer transition-all ${showFriendsPage?'bg-[#5865F2] rounded-[16px]':'bg-[#313338] hover:bg-[#5865F2] hover:rounded-[16px]'}`}>👥</div>
+        <div className="w-8 h-[2px] bg-[#2b2d31] rounded-full my-1"></div>
         {groups.map(g=>(
-          <div key={g.id} onClick={()=>setActiveGroup(g.id)} onContextMenu={(e)=>{ e.preventDefault(); setActiveGroup(g.id); setShowGroupMenu(true) }} className={`w-12 h-12 rounded-full flex items-center justify-center cursor-pointer ${activeGroup===g.id?'ring-2 ring-white':''} bg-[#313338] overflow-hidden`} style={{background:activeGroup===g.id?g.color||themeColor:''}}>
+          <div key={g.id} onClick={()=>{setActiveGroup(g.id); setShowFriendsPage(false)}} onContextMenu={(e)=>{ e.preventDefault(); setActiveGroup(g.id); setShowGroupMenu(true) }} className={`w-12 h-12 rounded-full flex items-center justify-center cursor-pointer ${activeGroup===g.id && !showFriendsPage?'ring-2 ring-white':''} bg-[#313338] overflow-hidden`} style={{background:activeGroup===g.id && !showFriendsPage?g.color||themeColor:''}}>
             {g.logo|| (g.id===activeGroup && logoImage)?<img src={g.logo||logoImage} className="w-full h-full object-cover rounded-full"/>:g.icon}
           </div>
         ))}
@@ -374,78 +416,250 @@ export default function App(){
       </div>
 
       <div className="w-60 bg-[#2b2d31] flex flex-col">
-        <div className="h-12 px-4 flex items-center border-b border-black/20 font-bold justify-between relative">
-          <span className="flex items-center gap-2">{groups.find(g=>g.id===activeGroup)?.name} <span className="text-xs">▼</span></span>
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] px-2 py-0.5 rounded-full" style={{background:themeColor}}>DONO</span>
-            <button onClick={()=>setShowGroupMenu(!showGroupMenu)} className="w-6 h-6 rounded-full hover:bg-[#35373c] flex items-center justify-center">⋮</button>
-          </div>
-          {showGroupMenu&&(
-            <div className="absolute top-12 left-2 right-2 bg-[#111214] rounded-md shadow-2xl border border-black p-2 z-50">
-              <div className="text-xs uppercase text-[#b5bac1] px-2 py-1">{groups.find(g=>g.id===activeGroup)?.name}</div>
-              <button onClick={()=>{ logoInputRef.current?.click(); setShowGroupMenu(false) }} className="w-full text-left px-2 py-1.5 rounded text-xs hover:bg-[#35373c] flex items-center gap-2"><span>🖼</span> Mudar foto do servidor</button>
-              <button onClick={()=>{ const n=prompt('Novo nome do servidor', groups.find(g=>g.id===activeGroup)?.name); if(n){ setGroups(groups.map(gr=>gr.id===activeGroup?{...gr, name:n}:gr)) } setShowGroupMenu(false) }} className="w-full text-left px-2 py-1.5 rounded text-xs hover:bg-[#35373c] flex items-center gap-2"><span>✏</span> Editar servidor</button>
-              <div className="h-[1px] bg-[#3f4147] my-1"></div>
-              <button onClick={()=>deleteServer(activeGroup)} className="w-full text-left px-2 py-1.5 rounded text-xs hover:bg-[#ed4245] text-[#ed4245] hover:text-white flex items-center gap-2"><span>🗑</span> Apagar servidor</button>
-            </div>
-          )}
-        </div>
-        <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoChange}/>
-        <div className="flex-1 p-2 space-y-4 overflow-y-auto">
-          <div>
-            <div className="text-xs uppercase text-[#b5bac1] px-2 flex justify-between">Canais de texto <span onClick={()=>{ const n=prompt('Nome do canal'); if(n){ const id=Date.now().toString(); setChannels([...channels,{id:`t-${id}`,name:n,type:'text',groupId:activeGroup, photo:'', createdBy:currentUser.id}]); } }} className="cursor-pointer">+</span></div>
-            {channels.filter(c=>c.groupId===activeGroup&&c.type==='text').map(ch=>(
-              <div key={ch.id} onContextMenu={(e)=>{ e.preventDefault(); openChannelConfig(ch) }} className="group flex items-center justify-between px-2 py-1.5 rounded mt-1 hover:bg-[#35373c]">
-                <div onClick={()=>setActiveChannel(ch.id)} className={`flex items-center gap-2 cursor-pointer flex-1 ${activeChannel===ch.id?'bg-[#404249] px-2 py-1 rounded-full':''}`}>
-                  {ch.photo?<img src={ch.photo} className="w-6 h-6 rounded-full object-cover"/>:<span className="text-[#80848e]">#</span>}
-                  <span className="text-sm">{ch.name}</span>
-                </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100">
-                  <button onClick={()=>openChannelConfig(ch)} className="w-6 h-6 rounded-full hover:bg-[#4e5058] flex items-center justify-center text-xs">⚙</button>
-                  <button onClick={()=>deleteTextChannel(ch)} className="w-6 h-6 rounded-full hover:bg-[#ed4245] flex items-center justify-center text-xs">🗑</button>
-                </div>
+        {!showFriendsPage ? (
+          <>
+            <div className="h-12 px-4 flex items-center border-b border-black/20 font-bold justify-between relative">
+              <span className="flex items-center gap-2">{groups.find(g=>g.id===activeGroup)?.name} <span className="text-xs">▼</span></span>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] px-2 py-0.5 rounded-full" style={{background:themeColor}}>DONO</span>
+                <button onClick={()=>setShowGroupMenu(!showGroupMenu)} className="w-6 h-6 rounded-full hover:bg-[#35373c] flex items-center justify-center">⋮</button>
               </div>
-            ))}
+              {showGroupMenu&&(
+                <div className="absolute top-12 left-2 right-2 bg-[#111214] rounded-md shadow-2xl border border-black p-2 z-50">
+                  <div className="text-xs uppercase text-[#b5bac1] px-2 py-1">{groups.find(g=>g.id===activeGroup)?.name}</div>
+                  <button onClick={()=>{ logoInputRef.current?.click(); setShowGroupMenu(false) }} className="w-full text-left px-2 py-1.5 rounded text-xs hover:bg-[#35373c] flex items-center gap-2"><span>🖼</span> Mudar foto do servidor</button>
+                  <button onClick={()=>{ const n=prompt('Novo nome do servidor', groups.find(g=>g.id===activeGroup)?.name); if(n){ setGroups(groups.map(gr=>gr.id===activeGroup?{...gr, name:n}:gr)) } setShowGroupMenu(false) }} className="w-full text-left px-2 py-1.5 rounded text-xs hover:bg-[#35373c] flex items-center gap-2"><span>✏</span> Editar servidor</button>
+                  <div className="h-[1px] bg-[#3f4147] my-1"></div>
+                  <button onClick={()=>deleteServer(activeGroup)} className="w-full text-left px-2 py-1.5 rounded text-xs hover:bg-[#ed4245] text-[#ed4245] hover:text-white flex items-center gap-2"><span>🗑</span> Apagar servidor</button>
+                </div>
+              )}
+            </div>
+            <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoChange}/>
+            <div className="flex-1 p-2 space-y-4 overflow-y-auto">
+              <div>
+                <div className="text-xs uppercase text-[#b5bac1] px-2 flex justify-between">Canais de texto <span onClick={()=>{ const n=prompt('Nome do canal'); if(n){ const id=Date.now().toString(); setChannels([...channels,{id:`t-${id}`,name:n,type:'text',groupId:activeGroup, photo:'', createdBy:currentUser.id}]); } }} className="cursor-pointer">+</span></div>
+                {channels.filter(c=>c.groupId===activeGroup&&c.type==='text').map(ch=>(
+                  <div key={ch.id} onContextMenu={(e)=>{ e.preventDefault(); openChannelConfig(ch) }} className="group flex items-center justify-between px-2 py-1.5 rounded mt-1 hover:bg-[#35373c]">
+                    <div onClick={()=>setActiveChannel(ch.id)} className={`flex items-center gap-2 cursor-pointer flex-1 ${activeChannel===ch.id?'bg-[#404249] px-2 py-1 rounded-full':''}`}>
+                      {ch.photo?<img src={ch.photo} className="w-6 h-6 rounded-full object-cover"/>:<span className="text-[#80848e]">#</span>}
+                      <span className="text-sm">{ch.name}</span>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100">
+                      <button onClick={()=>openChannelConfig(ch)} className="w-6 h-6 rounded-full hover:bg-[#4e5058] flex items-center justify-center text-xs">⚙</button>
+                      <button onClick={()=>deleteTextChannel(ch)} className="w-6 h-6 rounded-full hover:bg-[#ed4245] flex items-center justify-center text-xs">🗑</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4"><div className="text-xs uppercase text-[#b5bac1] px-2">Amigos - {friends.length}</div><div className="mt-2 space-y-1">{friends.map(f=><div key={f} className="px-2 py-1 bg-[#2b2d31] rounded-full text-xs flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-[#5865F2] flex items-center justify-center">{f[0].toUpperCase()}</span> {f} <span className="ml-auto w-2 h-2 bg-[#23a559] rounded-full"></span></div>)}{friends.length===0&&<div className="text-xs text-[#6d6f78] px-2">Nenhum amigo ainda</div>}</div></div>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col h-full">
+            <div className="p-2.5">
+              <button className="w-full bg-[#404249] text-[#f6f6f7] rounded-md px-2.5 py-1.5 text-sm text-left">🔍 Encontrar ou começar uma conversa</button>
+            </div>
+            <div className="px-2 space-y-0.5 mt-2">
+              <button onClick={()=>setFriendsTab('online')} className={`w-full flex items-center gap-3 px-2 py-1.5 rounded-md ${!showAddFriend && friendsTab!=='add'?'bg-[#404249] text-white':'text-[#b5bac1] hover:bg-[#35373c] hover:text-[#dcdee1]'}`}><span>👥</span> Amigos</button>
+              <button className="w-full flex items-center gap-3 px-2 py-1.5 rounded-md text-[#b5bac1] hover:bg-[#35373c] hover:text-[#dcdee1]"><span>⚡</span> Nitro</button>
+              <button className="w-full flex items-center gap-3 px-2 py-1.5 rounded-md text-[#b5bac1] hover:bg-[#35373c] hover:text-[#dcdee1]"><span>🛒</span> Loja</button>
+            </div>
+            <div className="mt-4 px-2 flex-1 overflow-y-auto">
+              <div className="flex items-center justify-between px-2 py-1">
+                <span className="text-xs font-semibold text-[#b5bac1] uppercase">Mensagens diretas</span><span className="text-[#b5bac1]">+</span>
+              </div>
+              <div className="mt-2 space-y-0.5">
+                {friends.map(f=>(
+                  <div key={f} className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-[#35373c] cursor-pointer group">
+                    <div className="w-8 h-8 rounded-full bg-[#5865F2] flex items-center justify-center text-sm">{f[0].toUpperCase()}</div>
+                    <span className="text-[#b5bac1] group-hover:text-white text-sm">{f}</span>
+                  </div>
+                ))}
+                {friends.length===0 && <div className="text-xs text-[#6d6f78] px-2 py-2">Nenhuma conversa</div>}
+              </div>
+            </div>
           </div>
-          <div className="mt-4"><div className="text-xs uppercase text-[#b5bac1] px-2">Amigos</div><div className="mt-2 space-y-1">{friends.map(f=><div key={f} className="px-2 py-1 bg-[#2b2d31] rounded-full text-xs">👤 {f}</div>)}{friends.length===0&&<div className="text-xs text-[#6d6f78] px-2">Nenhum amigo ainda</div>}</div></div>
-        </div>
+        )}
         <div className="bg-[#232428] border-t border-black/20 h-14 px-2 flex items-center justify-between">
           <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-[#2b2d31] flex items-center justify-center overflow-hidden cursor-pointer" onClick={()=>avatarInputRef.current?.click()}>{currentUser.avatar.startsWith('data:')?<img src={currentUser.avatar} className="w-full h-full object-cover rounded-full"/>:currentUser.avatar}</div><div className="leading-none"><div className="text-sm font-bold">{currentUser.name}</div><div className="text-xs text-[#23a559]">Online</div></div></div>
           <button onClick={()=>{setSettingsTab('conta'); setShowSettings(true)}} className="w-8 h-8 rounded-full hover:bg-[#35373c]">⚙</button>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col bg-[#313338]" onClick={()=>setShowGroupMenu(false)}>
-        <div className="h-12 border-b border-black/20 flex items-center px-4 justify-between">
-          <div className="flex items-center gap-2">
-            {activeChannelData?.photo?<img src={activeChannelData.photo} className="w-7 h-7 rounded-full object-cover"/>:<span className="text-[#80848e] text-xl">#</span>}
-            <b>{channels.find(c=>c.id===activeChannel)?.name}</b>
-            <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full" style={{background:themeColor}}>DONO</span>
-            {inVoice&&<span className="ml-2 text-xs bg-[#23a559] px-2 py-0.5 rounded-full animate-pulse">📞 {formatTime(voiceTime)} {Math.round(micLevel)}%</span>}
-          </div>
-          <div className="flex gap-2">
-            <button onClick={()=>setShowAddFriend(true)} className="px-3 py-1.5 rounded-full font-bold text-xs bg-[#2b2d31] hover:bg-[#35373c] flex items-center gap-1">👥 Add Amigo</button>
-            <button onClick={joinVoice} className={`px-4 py-1.5 rounded-full font-bold text-xs ${inVoice?'bg-[#ed4245]':'bg-[#23a559]'}`}>📞 {inVoice?'Desligar':'Ligar'}</button>
-            <button onClick={shareScreen} className={`px-4 py-1.5 rounded-full font-bold text-xs ${isScreenSharing?'bg-[#ed4245]':''}`} style={{background:isScreenSharing?'#ed4245':themeColor}}>🖥 Tela</button>
-          </div>
-        </div>
-        {isScreenSharing&&<div className="bg-[#1e1f22] p-2 border-b border-[#23a559]"><video ref={screenVideoRef} autoPlay className="w-full max-h-96 bg-black rounded-lg"/></div>}
-        <div className="flex-1 overflow-y-auto p-4 space-y-1">
-          {filtered.map((m:any)=>
-            <div key={m.id} className="group flex gap-3 hover:bg-[#2e3035] px-4 py-1.5 -mx-4 rounded-lg relative">
-              <div className="w-10 h-10 rounded-full bg-[#1e1f22] flex items-center justify-center overflow-hidden shrink-0">{m.avatar?.startsWith('data:')?<img src={m.avatar} className="w-full h-full object-cover rounded-full"/>:m.avatar}</div>
-              <div className="flex-1">
-                <div className="flex gap-2 items-center"><b className="text-sm">{m.user}</b><span className="text-xs text-[#949ba4]">{m.time}</span></div>
-                <div className="text-sm text-[#dcdee1] break-words">{m.text}</div>
-              </div>
-              <button onClick={()=>deleteMessage(m.id)} className="opacity-0 group-hover:opacity-100 absolute right-2 top-1 w-7 h-7 rounded-full bg-[#2b2d31] hover:bg-[#ed4245] flex items-center justify-center text-xs transition" title="Apagar mensagem">🗑</button>
+      {/* MAIN AREA */}
+      {showFriendsPage ? (
+        <div className="flex-1 flex flex-col bg-[#313338]">
+          {/* TOP TABS - IGUAL DISCORD */}
+          <div className="h-12 border-b border-black/20 flex items-center px-4 gap-4 bg-[#313338]">
+            <div className="flex items-center gap-2 font-bold text-white">
+              <span className="w-7 h-7 rounded-full flex items-center justify-center" style={{background:themeColor}}>👥</span> Amigos
             </div>
-          )}
-          {filtered.length===0&&<div className="text-center text-[#6d6f78] text-sm mt-10">Nenhuma mensagem em #{activeChannelData?.name} ainda.</div>}
-          <div ref={endRef}/>
+            <div className="w-[1px] h-6 bg-[#3f4147] mx-2"></div>
+            <div className="flex gap-2">
+              <button onClick={()=>setFriendsTab('online')} className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${friendsTab==='online'?'text-white shadow':'text-[#b5bac1] hover:bg-[#35373c] hover:text-white bg-[#2b2d31]'}`} style={{background:friendsTab==='online'?themeColor:''}}>Disponível</button>
+              <button onClick={()=>setFriendsTab('all')} className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${friendsTab==='all'?'text-white shadow':'text-[#b5bac1] hover:bg-[#35373c] bg-[#2b2d31]'}`} style={{background:friendsTab==='all'?themeColor:''}}>Todos • {friends.length}</button>
+              <button onClick={()=>setFriendsTab('pending')} className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${friendsTab==='pending'?'text-white shadow':'text-[#b5bac1] hover:bg-[#35373c] bg-[#2b2d31]'}`} style={{background:friendsTab==='pending'?themeColor:''}}>
+                Pendente {friendRequests.filter(r=>r.status==='pending').length>0 && <span className="bg-[#ed4245] text-white text-[10px] px-1.5 py-0.5 rounded-full">{friendRequests.filter(r=>r.status==='pending').length}</span>}
+              </button>
+              <button onClick={()=>setFriendsTab('blocked')} className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${friendsTab==='blocked'?'text-white shadow':'text-[#b5bac1] hover:bg-[#35373c] bg-[#2b2d31]'}`} style={{background:friendsTab==='blocked'?themeColor:''}}>Bloqueado</button>
+              <button onClick={()=>setFriendsTab('add')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition shadow ${friendsTab==='add'?'text-white':'text-white hover:brightness-110'}`} style={{background:friendsTab==='add'?'#23a559':themeColor}}>✨ Adicionar amigo</button>
+            </div>
+          </div>
+
+          {/* CONTENT */}
+          <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 p-4 overflow-y-auto">
+              {friendsTab==='add' ? (
+                <div className="max-w-[700px]">
+                  <h2 className="text-xl font-black text-white tracking-wide">ADICIONAR AMIGO</h2>
+                  <p className="text-sm text-[#b5bac1] mt-1">Você pode adicionar amigos com o nome de usuário do NEXUS. É no estilo Discord, mas com visual NEXUS redondo!</p>
+                  
+                  <div className={`mt-5 bg-[#2b2d31] border-2 rounded-full p-1.5 flex items-center gap-2 shadow-lg transition ${addFriendStatus==='error' || addFriendStatus==='already' || addFriendStatus==='self'?'border-[#ed4245]':'border-[#1e1f22] focus-within:border-[var(--nexus)]'}`} style={{borderColor: addFriendStatus==='idle' ? themeColor+'40' : undefined}}>
+                    <input 
+                      value={addFriendName} 
+                      onChange={e=>{setAddFriendName(e.target.value); setAddFriendStatus('idle'); setAddFriendMsg('')}} 
+                      onKeyDown={e=>e.key==='Enter'&&handleAddFriendDiscord()}
+                      placeholder="Você pode adicionar amigos com o nome de usuário do NEXUS. Ex: raul"
+                      className="flex-1 bg-transparent outline-none text-white placeholder-[#6d6f78] text-sm px-4 py-2"
+                    />
+                    <button onClick={handleAddFriendDiscord} disabled={!addFriendName.trim()} className="disabled:bg-[#4e5058] disabled:text-[#6d6f78] text-white px-6 py-2.5 rounded-full text-sm font-black shadow hover:brightness-110 transition" style={{background: themeColor}}>Enviar pedido</button>
+                  </div>
+                  
+                  {addFriendStatus!=='idle' && addFriendMsg && (
+                    <div className={`mt-2 text-sm ${addFriendStatus==='success'?'text-[#23a559]':'text-[#fa777c]'}`}>
+                      {addFriendStatus==='success' ? '✅ ' : '❌ '}{addFriendMsg}
+                    </div>
+                  )}
+
+                  <div className="mt-8 border-t border-[#3f4147]/30 pt-8 flex flex-col items-center">
+                    <div className="w-32 h-32 rounded-full flex items-center justify-center text-6xl shadow-xl" style={{background:themeColor}}>⚡</div>
+                    <p className="text-base font-bold text-white mt-4">NEXUS - Adicione seus amigos!</p>
+                    <p className="text-sm text-[#6d6f78] mt-2 text-center max-w-[400px]">O NEXUS está esperando por amigos. No estilo Discord, mas com visual NEXUS 100% redondo e roxo!</p>
+                  </div>
+                </div>
+              ) : friendsTab==='pending' ? (
+                <div>
+                  <div className="text-xs font-semibold text-[#b5bac1] uppercase mb-4">Pendente — {friendRequests.filter(r=>r.status==='pending').length}</div>
+                  {friendRequests.filter(r=>r.status==='pending').length===0 ? (
+                    <div className="flex flex-col items-center justify-center mt-20">
+                      <div className="text-6xl opacity-20">📭</div>
+                      <p className="text-sm text-[#6d6f78] mt-4">Não há pedidos pendentes. Tá tudo certo.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-0">
+                      {friendRequests.filter(r=>r.status==='pending').map(req=>(
+                        <div key={req.id} className="group flex items-center justify-between px-2 py-3 hover:bg-[#2e3035] rounded-lg border-t border-[#3f4147]/50">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-[#5865F2] flex items-center justify-center">{req.avatar}</div>
+                            <div>
+                              <div className="text-sm font-medium text-white">{req.name}</div>
+                              <div className="text-xs text-[#b5bac1]">Pedido de amizade recebido</div>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={()=>acceptFriend(req.id)} className="w-8 h-8 rounded-full bg-[#2b2d31] hover:bg-[#23a559] flex items-center justify-center">✓</button>
+                            <button onClick={()=>setFriendRequests(friendRequests.filter(r=>r.id!==req.id))} className="w-8 h-8 rounded-full bg-[#2b2d31] hover:bg-[#ed4245] flex items-center justify-center">✕</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : friendsTab==='online' ? (
+                <div>
+                  <div className="text-xs font-semibold text-[#b5bac1] uppercase mb-4">Online — {friends.length}</div>
+                  {friends.length===0 ? (
+                    <div className="flex flex-col items-center justify-center mt-20">
+                      <div className="text-6xl opacity-20">👻</div>
+                      <p className="text-sm text-[#6d6f78] mt-4">Ninguém está online. Chame seus amigos!</p>
+                      <button onClick={()=>setFriendsTab('add')} className="mt-4 bg-[#5865F2] px-4 py-1.5 rounded text-sm text-white">Adicionar amigo</button>
+                    </div>
+                  ) : (
+                    <div className="space-y-0">
+                      {friends.map(f=>(
+                        <div key={f} className="group flex items-center justify-between px-2 py-2 hover:bg-[#2e3035] rounded-lg border-t border-[#3f4147]/30">
+                          <div className="flex items-center gap-3">
+                            <div className="relative">
+                              <div className="w-8 h-8 rounded-full bg-[#5865F2] flex items-center justify-center">{f[0].toUpperCase()}</div>
+                              <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-[#23a559] rounded-full border-2 border-[#313338]"></div>
+                            </div>
+                            <div>
+                              <div className="text-sm font-medium text-white">{f}</div>
+                              <div className="text-xs text-[#b5bac1]">Online</div>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 opacity-0 group-hover:opacity-100">
+                            <button className="w-8 h-8 rounded-full bg-[#2b2d31] hover:bg-[#35373c] flex items-center justify-center text-[#b5bac1]">💬</button>
+                            <button className="w-8 h-8 rounded-full bg-[#2b2d31] hover:bg-[#35373c] flex items-center justify-center text-[#b5bac1]">📞</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : friendsTab==='all' ? (
+                <div>
+                  <div className="text-xs font-semibold text-[#b5bac1] uppercase mb-4">Todos os amigos — {friends.length}</div>
+                  <div className="space-y-0">
+                    {friends.map(f=>(
+                      <div key={f} className="flex items-center gap-3 px-2 py-2 hover:bg-[#2e3035] rounded-lg">
+                        <div className="w-8 h-8 rounded-full bg-[#5865F2] flex items-center justify-center">{f[0].toUpperCase()}</div>
+                        <span className="text-sm text-white">{f}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center mt-20">
+                  <div className="text-6xl opacity-20">🚫</div>
+                  <p className="text-sm text-[#6d6f78] mt-4">Você não pode ver quem está bloqueado. Isso é segredo.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Right sidebar - Atividade agora */}
+            <div className="w-60 border-l border-[#3f4147] bg-[#2b2d31] p-4 hidden lg:block">
+              <h3 className="text-sm font-bold text-white">Ativo agora</h3>
+              <div className="mt-4 text-xs text-[#b5bac1] text-center py-8">
+                <p className="font-medium text-white text-sm">Está calmo por enquanto...</p>
+                <p className="mt-1">Quando um amigo começar uma atividade — como jogar um jogo ou participar de uma chamada — ela aparecerá aqui!</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="p-4"><div className="bg-[#383a40] rounded-full flex items-center px-4 py-3"><input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder={`Conversar em #${channels.find(c=>c.id===activeChannel)?.name}`} className="flex-1 bg-transparent outline-none"/><button onClick={send} className="ml-3 w-8 h-8 rounded-full" style={{background:themeColor}}>↑</button></div></div>
-      </div>
+      ) : (
+        <div className="flex-1 flex flex-col bg-[#313338]" onClick={()=>setShowGroupMenu(false)}>
+          <div className="h-12 border-b border-black/20 flex items-center px-4 justify-between">
+            <div className="flex items-center gap-2">
+              {activeChannelData?.photo?<img src={activeChannelData.photo} className="w-7 h-7 rounded-full object-cover"/>:<span className="text-[#80848e] text-xl">#</span>}
+              <b>{channels.find(c=>c.id===activeChannel)?.name}</b>
+              <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full" style={{background:themeColor}}>DONO</span>
+              {inVoice&&<span className="ml-2 text-xs bg-[#23a559] px-2 py-0.5 rounded-full animate-pulse">📞 {formatTime(voiceTime)} {Math.round(micLevel)}%</span>}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={()=>{setShowFriendsPage(true); setFriendsTab('add')}} className="px-3 py-1.5 rounded-full font-bold text-xs bg-[#2b2d31] hover:bg-[#35373c] flex items-center gap-1">👥 Add Amigo</button>
+              <button onClick={joinVoice} className={`px-4 py-1.5 rounded-full font-bold text-xs ${inVoice?'bg-[#ed4245]':'bg-[#23a559]'}`}>📞 {inVoice?'Desligar':'Ligar'}</button>
+              <button onClick={shareScreen} className={`px-4 py-1.5 rounded-full font-bold text-xs ${isScreenSharing?'bg-[#ed4245]':''}`} style={{background:isScreenSharing?'#ed4245':themeColor}}>🖥 Tela</button>
+            </div>
+          </div>
+          {isScreenSharing&&<div className="bg-[#1e1f22] p-2 border-b border-[#23a559]"><video ref={screenVideoRef} autoPlay className="w-full max-h-96 bg-black rounded-lg"/></div>}
+          <div className="flex-1 overflow-y-auto p-4 space-y-1">
+            {filtered.map((m:any)=>
+              <div key={m.id} className="group flex gap-3 hover:bg-[#2e3035] px-4 py-1.5 -mx-4 rounded-lg relative">
+                <div className="w-10 h-10 rounded-full bg-[#1e1f22] flex items-center justify-center overflow-hidden shrink-0">{m.avatar?.startsWith('data:')?<img src={m.avatar} className="w-full h-full object-cover rounded-full"/>:m.avatar}</div>
+                <div className="flex-1">
+                  <div className="flex gap-2 items-center"><b className="text-sm">{m.user}</b><span className="text-xs text-[#949ba4]">{m.time}</span></div>
+                  <div className="text-sm text-[#dcdee1] break-words">{m.text}</div>
+                </div>
+                <button onClick={()=>deleteMessage(m.id)} className="opacity-0 group-hover:opacity-100 absolute right-2 top-1 w-7 h-7 rounded-full bg-[#2b2d31] hover:bg-[#ed4245] flex items-center justify-center text-xs transition" title="Apagar mensagem">🗑</button>
+              </div>
+            )}
+            {filtered.length===0&&<div className="text-center text-[#6d6f78] text-sm mt-10">Nenhuma mensagem em #{activeChannelData?.name} ainda.</div>}
+            <div ref={endRef}/>
+          </div>
+          <div className="p-4"><div className="bg-[#383a40] rounded-full flex items-center px-4 py-3"><input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder={`Conversar em #${channels.find(c=>c.id===activeChannel)?.name}`} className="flex-1 bg-transparent outline-none"/><button onClick={send} className="ml-3 w-8 h-8 rounded-full" style={{background:themeColor}}>↑</button></div></div>
+        </div>
+      )}
 
       <audio ref={audioRef} autoPlay playsInline className="hidden" />
 
@@ -488,37 +702,6 @@ export default function App(){
               <button onClick={()=>setShowChannelConfig(null)} className="px-5 py-2 rounded-full text-sm hover:bg-[#2b2d31]">Cancelar</button>
               <button onClick={saveChannelConfig} className="px-6 py-2 rounded-full text-white text-sm font-bold shadow" style={{background:themeColor}}>Salvar canal</button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {showAddFriend&&(
-        <div className="fixed top-12 right-4 w-96 bg-[#313338] rounded-lg shadow-2xl border border-black z-[200] p-4">
-          <div className="flex justify-between items-center"><h3 className="font-bold">Adicionar amigo - CONSERTADO</h3><button onClick={()=>setShowAddFriend(false)} className="w-6 h-6 rounded-full bg-[#2b2d31]">✕</button></div>
-          <p className="text-xs text-[#23a559] mt-1">✅ Agora funciona com qualquer nome! Ex: raul</p>
-          <div className="flex gap-2 mt-4">
-            <input value={addFriendName} onChange={e=>setAddFriendName(e.target.value)} placeholder="Nome do amigo ex: raul" className="flex-1 bg-[#1e1f22] p-2.5 rounded-full outline-none" onKeyDown={e=>e.key==='Enter'&&(() => { 
-              const name=addFriendName.trim(); 
-              if(!name) return; 
-              if(friends.includes(name)){ alert('Já é seu amigo'); return; }
-              // ANTES: if(!users.find(u=>u.name===name)) return alert('Usuário não existe');
-              // AGORA: PERMITE QUALQUER NOME
-              setFriends([...friends, name]); 
-              setAddFriendName(''); 
-              setShowAddFriend(false);
-            })()}/>
-            <button onClick={()=>{ 
-              const name=addFriendName.trim(); 
-              if(!name) return; 
-              if(friends.includes(name)){ alert('Já é seu amigo'); return; }
-              // CONSERTADO: NÃO BLOQUEIA MAIS SE NÃO EXISTIR
-              setFriends([...friends, name]); 
-              setAddFriendName(''); 
-              setShowAddFriend(false);
-            }} className="px-5 py-2.5 rounded-full font-bold text-white" style={{background:themeColor}}>Enviar</button>
-          </div>
-          <div className="mt-3 text-xs text-[#b5bac1]">
-            Digite qualquer nome e clique Enviar. Vai adicionar na lista de Amigos na esquerda.
           </div>
         </div>
       )}
@@ -614,7 +797,6 @@ export default function App(){
                         </div>
                       </div>
                     </div>
-
                     <div className="bg-[#2b2d31] p-4 rounded-lg border border-[#1e1f22]">
                       <div className="text-xs uppercase font-bold text-[#b5bac1]">Dispositivo de saída - SEU USB AUDIO</div>
                       <select value={selectedOutput} onChange={e=>setSelectedOutput(e.target.value)} className="w-full mt-2 bg-[#1e1f22] p-2.5 rounded text-sm outline-none border border-[#1e1f22]">
@@ -631,25 +813,9 @@ export default function App(){
                         </div>
                       </div>
                     </div>
-
-                    <div className="bg-[#2b2d31] p-4 rounded-lg border border-[#1e1f22] space-y-4">
-                      <div className="text-xs uppercase font-bold text-[#b5bac1]">Processamento de voz - AGORA FUNCIONA</div>
-                      <div className="bg-[#1e1f22] p-3 rounded-lg border border-[#23a559]/30">
-                        <div className="flex justify-between items-center">
-                          <div><div className="text-sm font-bold flex items-center gap-2">🔇 Supressão de ruído - ME6S {noiseSuppression&&<span className="text-[10px] bg-[#23a559] px-2 py-0.5 rounded-full">ATIVA</span>}</div><div className="text-xs text-[#b5bac1] mt-1">{noiseSuppression?'LIGADA - Corta ruído grave do ME6S, chiado, ventilador':'DESLIGADA - Com ruído de fundo'}</div></div>
-                          <button onClick={()=>setNoiseSuppression(!noiseSuppression)} className={`w-12 h-7 rounded-full relative transition ${noiseSuppression?'bg-[#23a559]':'bg-[#4e5058]'}`}><div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition ${noiseSuppression?'right-1':'left-1'}`}></div></button>
-                        </div>
-                        {noiseSuppression&&<div className="text-xs text-[#23a559] mt-2">✅ Filtro highpass 120Hz ativo - remove ronco e chiado do seu ME6S</div>}
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <div><div className="text-sm font-bold">Cancelamento de eco</div><div className="text-xs text-[#b5bac1]">{echoCancellation?'LIGADO - Use na ligação':'DESLIGADO - Use no teste'}</div></div>
-                        <button onClick={()=>setEchoCancellation(!echoCancellation)} className={`w-12 h-7 rounded-full relative transition ${echoCancellation?'bg-[#23a559]':'bg-[#4e5058]'}`}><div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition ${echoCancellation?'right-1':'left-1'}`}></div></button>
-                      </div>
-                    </div>
                   </div>
                 </div>
               )}
-
               {settingsTab==='aparencia'&&(
                 <div>
                   <h2 className="text-xl font-bold">Aparência - NEXUS</h2>
@@ -663,10 +829,6 @@ export default function App(){
                           {themeColor===c.color&&<div className="text-[10px] bg-white text-black px-2 py-0.5 rounded-full font-bold">Ativo</div>}
                         </button>
                       ))}
-                    </div>
-                    <div className="mt-6 bg-[#2b2d31] p-4 rounded-lg flex items-center gap-4 border border-[#1e1f22]">
-                      <div className="w-20 h-20 rounded-full flex items-center justify-center overflow-hidden" style={{background:logoImage?'transparent':themeColor}}>{logoImage?<img src={logoImage} className="w-full h-full object-cover rounded-full"/>:'N'}</div>
-                      <div><div className="text-sm font-bold">Logo NEXUS redondo</div><button onClick={()=>logoInputRef.current?.click()} className="mt-2 px-4 py-1.5 rounded-full text-white text-xs font-bold" style={{background:themeColor}}>Trocar N</button></div>
                     </div>
                   </div>
                 </div>
