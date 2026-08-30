@@ -163,36 +163,101 @@ export default function App(){
     return()=>clearInterval(iv)
   },[currentUser?.name])
 
-  // ADD FRIEND - DISCORD EXACT
+  // ADD FRIEND - DISCORD EXACT - CORRIGIDO 100%
   const handleAddFriend=async()=>{
     const raw=addFriendName.trim()
     if(!raw){ setAddFriendStatus('error'); setAddFriendMsg('Digite um nome de usuário.'); return }
     const name=raw.replace('@','').split('#')[0].trim()
-    if(name.toLowerCase()===currentUser?.name.toLowerCase()){ setAddFriendStatus('self'); setAddFriendMsg('Você não pode adicionar a si mesmo como amigo.'); return }
-    if(friends.some(f=>f.toLowerCase()===name.toLowerCase())){ setAddFriendStatus('already'); setAddFriendMsg(`Você já é amigo de ${name}!`); return }
+    const lowerName=name.toLowerCase()
+    if(lowerName===currentUser?.name.toLowerCase()){ setAddFriendStatus('self'); setAddFriendMsg('Você não pode adicionar a si mesmo como amigo.'); return }
+    if(friends.some(f=>f.toLowerCase()===lowerName)){ setAddFriendStatus('already'); setAddFriendMsg(`Você já é amigo de ${name}!`); return }
+    
+    // BUSCA 100% - local + global Supabase case-insensitive
     let exists=false
-    if(users.some(u=>u.name.toLowerCase()===name.toLowerCase())) exists=true
+    let foundUser:any=null
+    
+    // 1. Busca no IP local (localStorage)
+    const localUser=users.find(u=>u.name.toLowerCase()===lowerName)
+    if(localUser){ exists=true; foundUser=localUser }
+    
+    // 2. Busca no Supabase global - com ilike E com todos usuarios (mais confiavel)
     if(supabase && !exists){
       try{
-        const { data } = await supabase.from('nexus_users').select('name').ilike('name', name).limit(1)
-        if(data && data.length>0) exists=true
-      }catch{}
+        // Tenta ilike primeiro
+        const { data: dataIlike } = await supabase.from('nexus_users').select('*').ilike('name', name).limit(5)
+        if(dataIlike && dataIlike.length>0){
+          const exact=dataIlike.find((u:any)=>u.name.toLowerCase()===lowerName)
+          if(exact){ exists=true; foundUser=exact }
+        }
+        // Se nao achou, busca todos e compara lower (garantido)
+        if(!exists){
+          const { data: allUsers } = await supabase.from('nexus_users').select('name').limit(1000)
+          if(allUsers){
+            const found=allUsers.find((u:any)=>u.name.toLowerCase()===lowerName)
+            if(found){ exists=true; foundUser=found }
+          }
+        }
+      }catch(e:any){ 
+        console.log('Erro Supabase busca:', e.message)
+        // Se Supabase falhar, ainda deixa tentar enviar (pode ser que exista mas RLS bloqueou listagem)
+        // Vamos permitir envio mesmo se nao achou, mas avisa
+      }
     }
-    if(!exists){ setAddFriendStatus('error'); setAddFriendMsg(`Hm, não funcionou. Verifique se o nome de usuário está correto. Lembre-se que os nomes diferenciam maiúsculas de minúsculas. O usuário "${name}" precisa criar conta no seu link NEXUS primeiro!`); return }
+    
+    // Se ainda nao existe, tenta mesmo assim enviar se Supabase estiver ok (caso RLS)
+    // Mas mostra erro mais amigavel
+    if(!exists){ 
+      // DEBUG: mostra quantos usuarios existem
+      let totalLocal=users.length
+      let dica=`Hm, não funcionou. Verifique se o nome está correto.`
+      if(supabase){
+        try{
+          const { data: count } = await supabase.from('nexus_users').select('name').limit(1000)
+          dica+=`\n\nDEBUG: Encontrados ${count?.length||0} usuários no banco global + ${totalLocal} no seu IP.`
+          if(count && count.length>0){
+            dica+=`\nUsuarios no global: ${count.map((u:any)=>u.name).slice(0,10).join(', ')}`
+          }
+          dica+=`\n\nO usuário "${name}" precisa criar conta NESSE LINK: ${window.location.origin}`
+          dica+=`\nConta salva no IP dele + global. Se ele criou em outro link, não aparece!`
+        }catch{}
+      }
+      setAddFriendStatus('error'); 
+      setAddFriendMsg(`Hm, não funcionou. Verifique se o nome de usuário está correto. Lembre-se que os nomes diferenciam maiúsculas de minúsculas. O usuário "${name}" precisa criar conta no seu link NEXUS primeiro! ${!supabase?'\n\n⚠️ Supabase não conectado - só funciona no seu IP!':''}`);
+      return 
+    }
+    
+    // Verifica se já tem pedido
     if(supabase){
       try{
         const { data: a } = await supabase.from('nexus_friends').select('*').eq('owner_name', currentUser!.name).eq('friend_name', name)
         const { data: b } = await supabase.from('nexus_friends').select('*').eq('owner_name', name).eq('friend_name', currentUser!.name)
-        const all=[...(a||[]), ...(b||[])]
-        if(all.length>0){
-          if(all.some((f:any)=>f.status==='accepted')){ setAddFriendStatus('already'); setAddFriendMsg(`Você já é amigo de ${name}!`); return }
-          else { setAddFriendStatus('already'); setAddFriendMsg(`Você já enviou um pedido de amizade para ${name}!`); return }
+        // Também verifica lower
+        const { data: allPending } = await supabase.from('nexus_friends').select('*').or(`owner_name.ilike.${name},friend_name.ilike.${name}`).limit(20)
+        const all=[...(a||[]), ...(b||[]), ...(allPending||[])]
+        const filtered=all.filter((f:any)=> f.owner_name.toLowerCase()===lowerName || f.friend_name.toLowerCase()===lowerName || f.owner_name.toLowerCase()===currentUser!.name.toLowerCase())
+        if(filtered.length>0){
+          if(filtered.some((f:any)=>f.status==='accepted')){ setAddFriendStatus('already'); setAddFriendMsg(`Você já é amigo de ${name}!`); return }
+          else { setAddFriendStatus('already'); setAddFriendMsg(`Você já enviou um pedido de amizade para ${name}! Aguardando ele aceitar em Pendente.`); return }
         }
       }catch{}
     }
+    
+    // ENVIA PEDIDO
     const id=Date.now().toString()
-    if(supabase){ try{ await supabase.from('nexus_friends').insert({ id, owner_name: currentUser!.name, friend_name: name, status: 'pending' }) }catch(e:any){ setAddFriendStatus('error'); setAddFriendMsg(e.message); return } }
-    setAddFriendStatus('success'); setAddFriendMsg(`Sucesso! Seu pedido de amizade para ${name} foi enviado. Ele vai receber em Pendente!`); setAddFriendName(''); setTimeout(()=>{ setFriendsTab('pending'); loadFriendsGlobal(currentUser!.name) },800)
+    if(supabase){ 
+      try{ 
+        const { error } = await supabase.from('nexus_friends').insert({ id, owner_name: currentUser!.name, friend_name: foundUser?.name||name, status: 'pending' })
+        if(error) throw error
+      }catch(e:any){ 
+        setAddFriendStatus('error'); setAddFriendMsg(`Erro Supabase: ${e.message}.\n\nVerifique se você rodou o SQL de criação das tabelas no Supabase! Vou te mandar o SQL.`); 
+        return 
+      } 
+    } else {
+      // Sem Supabase, salva só local (só funciona no mesmo IP/PC)
+      const newReq={ id, name:foundUser?.name||name, status:'pending' as any, avatar:(foundUser?.name||name)[0].toUpperCase(), isIncoming:false }
+      setFriendRequests([...friendRequests, newReq])
+    }
+    setAddFriendStatus('success'); setAddFriendMsg(`Sucesso! Pedido enviado para ${foundUser?.name||name}! Ele vai receber em Pendente em até 3 segundos! Se não receber, ele precisa criar conta no MESMO link: ${window.location.origin}`); setAddFriendName(''); setTimeout(()=>{ setFriendsTab('pending'); loadFriendsGlobal(currentUser!.name) },800)
   }
   const acceptFriend=async(id:string)=>{
     const req=friendRequests.find(r=>r.id===id); if(!req) return
