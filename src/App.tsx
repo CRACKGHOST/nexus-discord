@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { supabase } from './lib/supabase'
 
 type User = { id:string, name:string, avatar:string, banner:string, password:string, bio:string }
 type Group = { id:string, name:string, ownerId:string, icon:string, color:string, logo?:string }
@@ -8,6 +9,7 @@ type FriendRequest = { id:string, name:string, status:'pending'|'accepted'|'bloc
 export default function App(){
   const [users,setUsers]=useState<User[]>(()=>{ try{ return JSON.parse(localStorage.getItem('nexus-users')||'[]') }catch{ return [] } })
   const [currentUser,setCurrentUser]=useState<User|null>(()=>{ try{ return JSON.parse(localStorage.getItem('nexus-current')||'null') }catch{ return null } })
+  const [isSupabaseConnected,setIsSupabaseConnected]=useState(false)
   const [groups,setGroups]=useState<Group[]>(()=>{
     try{ const s=localStorage.getItem('nexus-groups'); if(s) return JSON.parse(s); return [{id:'1', name:'teste', ownerId:'', icon:'T', color:'#7c3aed', logo:''}] }catch{ return [{id:'1', name:'teste', ownerId:'', icon:'T', color:'#7c3aed', logo:''}] }
   })
@@ -104,6 +106,44 @@ export default function App(){
     }catch(e){ console.log('erro loadDevices', e) }
   }
   useEffect(()=>{ loadDevices() },[showSettings])
+  // 🔥 SUPABASE - CARREGA CONTAS DO MUNDO TODO (pra link direto funcionar)
+  useEffect(()=>{
+    const loadFromSupabase = async () => {
+      if(!supabase) {
+        console.log('NEXUS rodando offline - localStorage');
+        return
+      }
+      try{
+        const { data: usersData } = await supabase.from('nexus_users').select('*').limit(1000)
+        if(usersData && usersData.length>0){
+          const mapped = usersData.map((u:any)=>({ id: u.id, name: u.name, password: u.password, avatar: u.avatar || '😎', banner: '#7c3aed', bio: '' }))
+          setUsers(mapped)
+          setIsSupabaseConnected(true)
+          console.log('✅ NEXUS conectado no Supabase - ', mapped.length, ' contas globais carregadas')
+        }
+        const { data: groupsData } = await supabase.from('nexus_groups').select('*')
+        if(groupsData && groupsData.length>0){
+          const mappedG = groupsData.map((g:any)=>({ id: g.id, name: g.name, ownerId: g.owner_id, icon: g.icon, color: g.color, logo: g.logo }))
+          setGroups(mappedG)
+        }
+        const { data: channelsData } = await supabase.from('nexus_channels').select('*')
+        if(channelsData && channelsData.length>0){
+          const mappedC = channelsData.map((c:any)=>({ id: c.id, name: c.name, type: c.type, groupId: c.group_id, photo: c.photo, createdBy: c.created_by }))
+          setChannels(mappedC)
+        }
+        const { data: msgsData } = await supabase.from('nexus_msgs').select('*').order('created_at', {ascending:true}).limit(200)
+        if(msgsData && msgsData.length>0){
+          const mappedM = msgsData.map((m:any)=>({ id: m.id, user: m.user_name, text: m.text, groupId: m.group_id, avatar: m.avatar, time: m.time, userId: m.user_id }))
+          setMsgs(mappedM)
+        }
+      }catch(e){
+        console.log('Supabase offline, usando localStorage', e)
+      }
+    }
+    loadFromSupabase()
+  },[])
+
+
 
   const send=()=>{
     if(!input.trim()) return
@@ -334,8 +374,33 @@ export default function App(){
 
   const formatTime=(s:number)=>{ const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}` }
 
-  // DISCORD-LIKE ADD FRIEND LOGIC
-  const handleAddFriendDiscord = () => {
+  // 🔥 GLOBAL FRIEND SYSTEM - FIX CORRIGIDO
+  const loadFriendsGlobal = async (userName:string) => {
+    if(!supabase || !userName) return
+    try{
+      const { data, error } = await supabase.from('nexus_friends').select('*').or(`owner_name.eq.${userName},friend_name.eq.${userName}`)
+      if(error) { console.log('erro friends', error); return }
+      if(data){
+        const accepted = data.filter((f:any)=>f.status==='accepted').map((f:any)=> f.owner_name===userName ? f.friend_name : f.owner_name)
+        setFriends([...new Set(accepted)])
+        const pending = data.filter((f:any)=>f.status==='pending').map((f:any)=>{
+          const other = f.owner_name===userName ? f.friend_name : f.owner_name
+          const isIncoming = f.friend_name===userName
+          return { id: f.id, name: other, status: f.status as any, avatar: other[0].toUpperCase(), mutual: 1, isIncoming, raw: f }
+        })
+        setFriendRequests(pending)
+      }
+    }catch(e){ console.log('loadFriends error', e) }
+  }
+
+  useEffect(()=>{
+    if(currentUser?.name) loadFriendsGlobal(currentUser.name)
+    const interval = setInterval(()=>{ if(currentUser?.name) loadFriendsGlobal(currentUser.name) }, 4000)
+    return ()=>clearInterval(interval)
+  },[currentUser?.name, isSupabaseConnected])
+
+  // DISCORD-LIKE ADD FRIEND LOGIC - GLOBAL
+  const handleAddFriendDiscord = async () => {
     const name = addFriendName.trim()
     if(!name){
       setAddFriendStatus('error')
@@ -352,20 +417,73 @@ export default function App(){
       setAddFriendMsg('Você já é amigo desse usuário!')
       return
     }
-    // Sucesso - igual Discord
-    setFriends([...friends, name])
-    const newReq: FriendRequest = { id: Date.now().toString(), name, status: 'pending', avatar: name[0].toUpperCase(), mutual: Math.floor(Math.random()*5) }
-    setFriendRequests([...friendRequests, newReq])
+    if(!supabase){
+      setAddFriendStatus('error')
+      setAddFriendMsg('Supabase não conectado - verifica o Vercel')
+      return
+    }
+    // Verifica se usuário existe no mundo todo
+    const { data: userExists } = await supabase.from('nexus_users').select('name').eq('name', name).single()
+    if(!userExists){
+      setAddFriendStatus('error')
+      setAddFriendMsg(`Usuário "${name}" não existe! Ele precisa criar conta primeiro no seu link.`)
+      return
+    }
+    // Verifica se já tem pedido
+    const { data: existing } = await supabase.from('nexus_friends').select('*').or(`and(owner_name.eq.${currentUser!.name},friend_name.eq.${name}),and(owner_name.eq.${name},friend_name.eq.${currentUser!.name})`)
+    if(existing && existing.length>0){
+      const acc = existing.find((f:any)=>f.status==='accepted')
+      if(acc){
+        setAddFriendStatus('already')
+        setAddFriendMsg('Vocês já são amigos!')
+        return
+      }else{
+        setAddFriendStatus('already')
+        setAddFriendMsg('Pedido já enviado! Esperando aceitar.')
+        return
+      }
+    }
+    // Envia pro Supabase - a outra pessoa vai receber!
+    const id = Date.now().toString()
+    const { error } = await supabase.from('nexus_friends').insert({ id, owner_name: currentUser!.name, friend_name: name, status: 'pending' })
+    if(error){
+      setAddFriendStatus('error')
+      setAddFriendMsg('Erro ao enviar: ' + error.message)
+      return
+    }
     setAddFriendStatus('success')
-    setAddFriendMsg(`Pedido de amizade enviado para ${name}!`)
+    setAddFriendMsg(`Pedido de amizade enviado para ${name}! Ele vai receber em até 4s!`)
     setAddFriendName('')
-    setTimeout(()=>{ setFriendsTab('pending') }, 800)
+    setTimeout(()=>{ setFriendsTab('pending'); if(currentUser?.name) loadFriendsGlobal(currentUser.name) }, 800)
   }
 
-  const acceptFriend = (id:string) => {
-    const req = friendRequests.find(r=>r.id===id)
+  const acceptFriend = async (id:string) => {
+    const req = friendRequests.find(r=>r.id===id) as any
+    if(!req) return
+    if(supabase){
+      try{
+        await supabase.from('nexus_friends').update({ status: 'accepted' }).eq('id', id)
+      }catch{}
+    }
     if(req && !friends.includes(req.name)) setFriends([...friends, req.name])
-    setFriendRequests(friendRequests.map(r=>r.id===id?{...r, status:'accepted'}:r))
+    setFriendRequests(friendRequests.filter(r=>r.id!==id))
+    // Cria registro reverso se não existe pra ficar mutuo
+    if(supabase){
+      try{
+        const other = req.name
+        const { data: reverse } = await supabase.from('nexus_friends').select('*').eq('owner_name', other).eq('friend_name', currentUser!.name).single()
+        if(!reverse){
+          // já existe o mesmo pedido, só aceitamos, não precisa duplicar - o filtro or já pega
+        }
+      }catch{}
+    }
+  }
+
+  const rejectFriend = async (id:string) => {
+    if(supabase){
+      try{ await supabase.from('nexus_friends').delete().eq('id', id) }catch{}
+    }
+    setFriendRequests(friendRequests.filter(r=>r.id!==id))
   }
 
   const themeColors=[
@@ -391,7 +509,38 @@ export default function App(){
           <div className="space-y-3 mt-6">
             <input value={regName} onChange={e=>setRegName(e.target.value)} placeholder="Usuário" className="w-full bg-[#2b2d31] p-2.5 rounded-full outline-none"/>
             <input value={regPass} onChange={e=>setRegPass(e.target.value)} type="password" placeholder="Senha" className="w-full bg-[#2b2d31] p-2.5 rounded-full outline-none"/>
-            <button onClick={()=>{ if(authMode==='register'){ if(!regName||!regPass) return; const u={id:Date.now().toString(),name:regName,avatar:'😎',banner:themeColor,password:regPass,bio:''} as any; setUsers([...users,u]); setCurrentUser(u); setGroups(g=>g.map(gr=>gr.ownerId?gr:{...gr, ownerId:u.id})) }else{ const u=users.find(u=>u.name===regName&&u.password===regPass); if(!u) return alert('Cria conta'); setCurrentUser(u) } }} className="w-full py-2.5 rounded-full font-bold" style={{background:themeColor}}>Entrar</button>
+            <button onClick={async()=>{
+              if(authMode==='register'){
+                if(!regName||!regPass) return alert('Preencha usuário e senha');
+                const id = Date.now().toString()
+                const u={id,name:regName,avatar:'😎',banner:themeColor,password:regPass,bio:''} as any;
+                setUsers([...users,u]); 
+                setCurrentUser(u); 
+                setGroups(g=>g.map(gr=>gr.ownerId?gr:{...gr, ownerId:u.id}))
+                // 🔥 SALVA GLOBAL NO SUPABASE PRA TODO MUNDO VER
+                if(supabase){
+                  try{
+                    await supabase.from('nexus_users').insert({ id, name: regName, password: regPass, avatar: '😎' })
+                    console.log('✅ Conta salva global no Supabase:', regName)
+                  }catch(e){ console.log('Erro Supabase', e) }
+                }
+              }else{
+                // Login - tenta Supabase primeiro, depois local
+                if(supabase){
+                  try{
+                    const { data } = await supabase.from('nexus_users').select('*').eq('name', regName).eq('password', regPass).single()
+                    if(data){
+                      const u = { id: data.id, name: data.name, avatar: data.avatar||'😎', banner: themeColor, password: data.password, bio: '' } as any
+                      setCurrentUser(u)
+                      return
+                    }
+                  }catch{}
+                }
+                const u=users.find(u=>u.name===regName&&u.password===regPass); 
+                if(!u) return alert('Usuário não existe - Cria conta primeiro!'); 
+                setCurrentUser(u) 
+              }
+            }} className="w-full py-2.5 rounded-full font-bold" style={{background:themeColor}}>Entrar</button>
             <div className="text-center text-[#a78bfa] text-sm cursor-pointer" onClick={()=>setAuthMode(authMode==='login'?'register':'login')}>{authMode==='login'?'Criar conta':'Já tem?'}</div>
           </div>
         </div>
@@ -558,7 +707,7 @@ export default function App(){
                           </div>
                           <div className="flex gap-2">
                             <button onClick={()=>acceptFriend(req.id)} className="w-8 h-8 rounded-full bg-[#2b2d31] hover:bg-[#23a559] flex items-center justify-center">✓</button>
-                            <button onClick={()=>setFriendRequests(friendRequests.filter(r=>r.id!==req.id))} className="w-8 h-8 rounded-full bg-[#2b2d31] hover:bg-[#ed4245] flex items-center justify-center">✕</button>
+                            <button onClick={()=>rejectFriend(req.id)} className="w-8 h-8 rounded-full bg-[#2b2d31] hover:bg-[#ed4245] flex items-center justify-center">✕</button>
                           </div>
                         </div>
                       ))}
