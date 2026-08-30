@@ -4,7 +4,7 @@ import { supabase } from './lib/supabase'
 type User = { id:string, name:string, avatar:string, banner:string, password:string, bio:string }
 type Group = { id:string, name:string, ownerId:string, icon:string, color:string, logo?:string }
 type Channel = { id:string, name:string, type:'text'|'voice', groupId:string, photo?:string, createdBy?:string }
-type FriendRequest = { id:string, name:string, status:'pending'|'accepted'|'blocked', avatar:string, mutual?:number }
+type FriendRequest = { id:string, name:string, status:'pending'|'accepted'|'blocked', avatar:string, mutual?:number, isIncoming?:boolean, raw?:any }
 
 export default function App(){
   const [users,setUsers]=useState<User[]>(()=>{ try{ return JSON.parse(localStorage.getItem('nexus-users')||'[]') }catch{ return [] } })
@@ -430,7 +430,9 @@ export default function App(){
       return
     }
     // Verifica se já tem pedido
-    const { data: existing } = await supabase.from('nexus_friends').select('*').or(`and(owner_name.eq.${currentUser!.name},friend_name.eq.${name}),and(owner_name.eq.${name},friend_name.eq.${currentUser!.name})`)
+    const { data: existing1 } = await supabase.from('nexus_friends').select('*').eq('owner_name', currentUser!.name).eq('friend_name', name)
+    const { data: existing2 } = await supabase.from('nexus_friends').select('*').eq('owner_name', name).eq('friend_name', currentUser!.name)
+    const existing = [...(existing1||[]), ...(existing2||[])]
     if(existing && existing.length>0){
       const acc = existing.find((f:any)=>f.status==='accepted')
       if(acc){
